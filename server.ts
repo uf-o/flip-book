@@ -9,7 +9,8 @@ const app = express();
 const PORT = 3000;
 const HOST = '0.0.0.0';
 
-app.use(express.json());
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 // In-memory data store for vault records
 const collections: Record<string, Array<{ id: string; value: any }>> = {

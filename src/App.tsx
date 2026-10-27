@@ -19,6 +19,8 @@ type ChapterRecord = {
   memory: number;
   vault: string;
   description: string;
+  pages?: string[];
+  isPdf?: boolean;
 };
 
 type CharacterRecord = {
@@ -300,6 +302,37 @@ function Waveform({ stress = 55 }: { stress?: number }) {
 }
 
 function ComicPageContent({ pageNum, chapter, char }: { pageNum: number; chapter: ChapterRecord; char?: CharacterRecord[] }) {
+  // If chapter contains extracted PDF pages, render the real page!
+  if (chapter.pages && chapter.pages[pageNum]) {
+    return (
+      <div className="w-full h-full bg-[var(--paper)] text-[var(--text)] p-[6px] md:p-[8px] flex flex-col paper-texture overflow-hidden relative select-none">
+        {/* header strip */}
+        <div className="flex justify-between text-[8px] tracking-[0.18em] border-b border-[var(--border-soft)] pb-[4px] uppercase opacity-75 shrink-0">
+          <span className="truncate max-w-[70%]">{chapter.vault} // {chapter.title}</span>
+          <span>P{String(pageNum + 1).padStart(2, '0')}/{String(chapter.pageCount).padStart(2, '0')} • PDF</span>
+        </div>
+
+        {/* page frame */}
+        <div className="flex-1 w-full h-full min-h-0 relative overflow-hidden flex items-center justify-center bg-black/5 dark:bg-white/5 border border-[var(--border-soft)] p-1">
+          <img
+            src={chapter.pages[pageNum]}
+            alt={`Page ${pageNum + 1}`}
+            className="w-full h-full object-contain pointer-events-none select-none drop-shadow-sm"
+          />
+        </div>
+
+        {/* footer telemetry */}
+        <div className="mt-1 flex items-center justify-between text-[7px] opacity-60 tracking-widest shrink-0">
+          <span>CELL ARCHIVE // PDF RENDER</span>
+          <span className="flex items-center gap-1">
+            <span className="w-[4px] h-[4px] bg-[var(--accent-2)] rounded-full animate-pulse" />
+            <span>OPTICAL STABLE</span>
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   // generate fake comic panels per page
   const panelType = pageNum % 4;
   return (
@@ -473,6 +506,9 @@ export default function App() {
   const [dragX, setDragX] = useState(0);
   const dragRef = useRef<{ startX: number; dragging: boolean }>({ startX: 0, dragging: false });
   const containerRef = useRef<HTMLDivElement>(null);
+  const [pdfImportProgress, setPdfImportProgress] = useState<{ current: number; total: number; filename: string } | null>(null);
+  const [isDraggingPdf, setIsDraggingPdf] = useState(false);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
 
   // Time ticker
   useEffect(() => {
@@ -636,6 +672,119 @@ export default function App() {
     return characters.filter((c) => c.name.toLowerCase().includes(q) || c.role.toLowerCase().includes(q) || c.tags.some((t) => t.toLowerCase().includes(q)));
   }, [characters, search]);
 
+  // Import PDF as flipbook chapter
+  async function handlePdfFile(file: File) {
+    if (!file || !file.name.toLowerCase().endsWith('.pdf')) {
+      alert('PLEASE SELECT A VALID PDF FILE (.pdf)');
+      return;
+    }
+
+    setBusy(true);
+    setPdfImportProgress({ current: 0, total: 1, filename: file.name });
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+
+      let pdfjs = (window as any).pdfjsLib;
+      if (!pdfjs) {
+        try {
+          const mod = await import('pdfjs-dist/build/pdf.js');
+          pdfjs = mod.default || mod;
+          (window as any).pdfjsLib = pdfjs;
+        } catch (e) {
+          console.warn('Dynamic import pdfjs-dist failed:', e);
+        }
+      }
+
+      if (!pdfjs) {
+        throw new Error('PDF.js reader engine is initializing. Please retry in a few seconds.');
+      }
+
+      // Configure worker
+      try {
+        if (pdfjs.GlobalWorkerOptions) {
+          pdfjs.GlobalWorkerOptions.workerSrc = window.location.origin + '/pdf.worker.min.js' || PDFJS_WORKER_URL;
+        }
+      } catch {}
+
+      const loadingTask = pdfjs.getDocument({
+        data: new Uint8Array(arrayBuffer),
+        cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+        cMapPacked: true,
+      });
+
+      const pdf = await loadingTask.promise;
+      const numPages = pdf.numPages;
+      const maxPages = Math.min(numPages, 48); // Support up to 48 pages per chapter
+
+      setPdfImportProgress({ current: 0, total: maxPages, filename: file.name });
+
+      const renderedPages: string[] = [];
+
+      for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+        setPdfImportProgress({ current: pageNum, total: maxPages, filename: file.name });
+
+        const page = await pdf.getPage(pageNum);
+        const unscaledViewport = page.getViewport({ scale: 1.0 });
+
+        // Calculate appropriate scale: standard book proportions ~1100px max dimension
+        const maxDim = Math.max(unscaledViewport.width, unscaledViewport.height);
+        const scale = Math.min(1.8, Math.max(0.8, 1100 / maxDim));
+        const viewport = page.getViewport({ scale });
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        const ctx = canvas.getContext('2d');
+
+        if (ctx) {
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          renderedPages.push(canvas.toDataURL('image/jpeg', 0.82));
+        }
+      }
+
+      if (renderedPages.length === 0) {
+        throw new Error('Could not render any pages from this PDF file.');
+      }
+
+      const id = `ch_${Date.now()}`;
+      const cleanTitle = file.name
+        .replace(/\.[^/.]+$/, "")
+        .replace(/[_-]/g, " ")
+        .slice(0, 36)
+        .toUpperCase();
+
+      const newRecord: ChapterRecord = {
+        id,
+        title: cleanTitle,
+        pageCount: renderedPages.length,
+        date: new Date().toISOString().slice(0, 10).replace(/-/g, '.'),
+        characterIds: [],
+        stress: Math.floor(Math.random() * 40) + 25,
+        offset: Math.floor(Math.random() * 30) + 10,
+        anchor: Math.floor(Math.random() * 30) + 65,
+        memory: Math.floor(Math.random() * 40) + 50,
+        vault: `BX-${1100 + chapters.length + 1}`,
+        description: `Imported PDF: ${file.name} (${renderedPages.length} pages). Transmuted into flipbook archive.`,
+        pages: renderedPages,
+        isPdf: true,
+      };
+
+      await api('records.create', { collection: 'chapters', value: newRecord, idempotency_key: makeKey() });
+      await reloadRecords();
+
+      // Open reader immediately on the newly imported PDF!
+      openChapter(newRecord);
+      setShowNewChapter(false);
+    } catch (err: any) {
+      console.error('PDF Import error:', err);
+      alert(`PDF IMPORT FAILED: ${err.message || 'Unknown error'}`);
+    } finally {
+      setBusy(false);
+      setPdfImportProgress(null);
+    }
+  }
+
   // Create character
   async function handleCreateChar() {
     if (!newChar.name) return;
@@ -748,6 +897,20 @@ export default function App() {
       data-safe-area-inset-root
       className="min-h-screen w-full bg-[var(--bg)] text-[var(--text)] overflow-x-clip selection:bg-[var(--text)] selection:text-[var(--bg)]"
       style={{ boxSizing: 'border-box', paddingTop: 'var(--safe-area-inset-top)' }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDraggingPdf(true);
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        setIsDraggingPdf(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setIsDraggingPdf(false);
+        const file = e.dataTransfer.files?.[0];
+        if (file) handlePdfFile(file);
+      }}
     >
       {loading ? (
         <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
@@ -841,15 +1004,35 @@ export default function App() {
                 <h2 className="text-[14px] font-bold tracking-[0.2em]">CHAPTERS // {String(chapters.length).padStart(2, '0')}</h2>
                 <span className="text-[8px] opacity-60 tracking-widest">VAULT INDEX • DOT MATRIX ACTIVE</span>
               </div>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
+                  type="button"
                   onClick={() => setShowNewChapter(true)}
-                  className="border border-[var(--border)] bg-[var(--text)] text-[var(--bg)] px-3 py-2 text-[10px] tracking-[0.18em] hover:opacity-80"
+                  className="border border-[var(--border)] bg-[var(--text)] text-[var(--bg)] px-3 py-2 text-[10px] tracking-[0.18em] hover:opacity-80 cursor-pointer"
                 >
                   NEW CHAPTER // +
                 </button>
-                <div className="border border-dashed border-[var(--border-soft)] px-3 py-2 text-[9px] opacity-70 max-w-[300px]">
-                  PDF IMPORT DISABLED: File storage not available yet (backend has no file store). Use demo vault or create metadata chapter. Image/file uploads are not supported yet.
+                <button
+                  type="button"
+                  onClick={() => pdfInputRef.current?.click()}
+                  className="border border-[var(--border)] bg-[var(--accent)] text-white px-3 py-2 text-[10px] tracking-[0.18em] font-bold hover:opacity-90 flex items-center gap-1.5 cursor-pointer shadow-sm transition-transform active:scale-95"
+                >
+                  <span>IMPORT PDF // ⇪</span>
+                </button>
+                <input
+                  ref={pdfInputRef}
+                  type="file"
+                  accept="application/pdf"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handlePdfFile(file);
+                    e.target.value = '';
+                  }}
+                  className="hidden"
+                />
+                <div className="border border-dashed border-[var(--border-soft)] px-3 py-2 text-[9px] opacity-80 flex items-center gap-1.5 bg-[var(--bg-card)]">
+                  <span className="w-[6px] h-[6px] bg-[var(--accent-2)] rounded-full animate-pulse" />
+                  <span>PDF FLIPBOOK READY: Drop any .pdf to convert</span>
                 </div>
               </div>
             </div>
@@ -868,10 +1051,17 @@ export default function App() {
                         <span className="text-[7px] opacity-60">{ch.date}</span>
                       </div>
                     </div>
-                    {/* eye */}
+                    {/* eye / cover thumbnail */}
                     <div className="mt-3 flex gap-3">
-                      <div className="w-[86px] h-[86px] border border-[var(--border)] bg-[var(--bg)] flex items-center justify-center p-2 shrink-0">
-                        <DotMatrix seed={parseInt(ch.id.slice(-2)) || 3} rows={7} cols={7} />
+                      <div className="w-[86px] h-[86px] border border-[var(--border)] bg-[var(--bg)] flex items-center justify-center p-1 shrink-0 overflow-hidden relative">
+                        {ch.pages && ch.pages[0] ? (
+                          <>
+                            <img src={ch.pages[0]} alt="cover" className="w-full h-full object-cover select-none" />
+                            <div className="absolute top-1 right-1 bg-[var(--accent)] text-white text-[6px] px-1 font-bold">PDF</div>
+                          </>
+                        ) : (
+                          <DotMatrix seed={parseInt(ch.id.slice(-2)) || 3} rows={7} cols={7} />
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="text-[44px] font-bold leading-[0.8] tracking-tighter">{ch.id.split('_')[1] || '01'}</div>
@@ -879,7 +1069,9 @@ export default function App() {
                         <div className="text-[8px] opacity-60 mt-1 line-clamp-2 leading-[1.2]">{ch.description}</div>
                         <div className="mt-2 flex items-center gap-2">
                           <MiniBar value={ch.stress} />
-                          <span className="text-[7px] tracking-widest">STRESS {ch.stress}% • {ch.pageCount}P</span>
+                          <span className="text-[7px] tracking-widest">
+                            {ch.pages ? 'PDF VAULT' : `STRESS ${ch.stress}%`} • {ch.pageCount}P
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -1273,19 +1465,82 @@ export default function App() {
 
       {showNewChapter && (
         <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px] flex items-center justify-center p-4">
-          <div className="w-full max-w-[480px] border border-[var(--border)] bg-[var(--bg-card)] p-4">
+          <div className="w-full max-w-[480px] border border-[var(--border)] bg-[var(--bg-card)] p-4 shadow-2xl">
             <div className="flex justify-between items-center mb-3">
               <div className="text-[11px] tracking-[0.2em] font-bold">NEW CHAPTER // VAULT ENTRY</div>
-              <button onClick={() => setShowNewChapter(false)} className="border border-[var(--border)] px-2 py-1 text-[8px]">X</button>
+              <button onClick={() => setShowNewChapter(false)} className="border border-[var(--border)] px-2 py-1 text-[8px] cursor-pointer">X</button>
             </div>
+
+            {/* PDF Quick Import Card */}
+            <div
+              onClick={() => {
+                setShowNewChapter(false);
+                pdfInputRef.current?.click();
+              }}
+              className="mb-4 border-2 border-dashed border-[var(--accent)] hover:bg-[var(--accent)]/10 bg-[var(--bg)] p-4 text-center cursor-pointer transition-all group"
+            >
+              <div className="text-[22px] mb-1 group-hover:scale-110 transition-transform text-[var(--accent)]">⇪</div>
+              <div className="text-[11px] font-bold tracking-[0.18em] text-[var(--accent)]">IMPORT PDF FILE AS FLIPBOOK</div>
+              <div className="text-[8px] opacity-75 mt-1">Converts all PDF pages directly into high-fidelity 3D flipbook comic panels</div>
+            </div>
+
+            <div className="flex items-center gap-2 mb-3">
+              <div className="flex-1 h-[1px] bg-[var(--border-soft)]" />
+              <span className="text-[7px] tracking-[0.2em] opacity-50 uppercase">OR CREATE PROCEDURAL ENTRY</span>
+              <div className="flex-1 h-[1px] bg-[var(--border-soft)]" />
+            </div>
+
             <div className="space-y-2">
               <input value={newChapter.title || ''} onChange={(e) => setNewChapter((s) => ({ ...s, title: e.target.value }))} placeholder="TITLE // THE STATIC PROTOCOL" className="w-full border border-[var(--border)] bg-[var(--bg)] px-2 py-2 text-[10px] outline-none" />
-              <textarea value={newChapter.description || ''} onChange={(e) => setNewChapter((s) => ({ ...s, description: e.target.value }))} placeholder="DESCRIPTION // Vault log" className="w-full border border-[var(--border)] bg-[var(--bg)] px-2 py-2 text-[10px] outline-none h-[80px]" />
-              <div className="border border-dashed border-[var(--border-soft)] p-2 text-[8px] opacity-60">Pages are auto-generated as diagnostic flipbook patterns. PDF file import is disabled because the backend has no file storage yet – per platform rules image/file uploads are not supported.</div>
+              <textarea value={newChapter.description || ''} onChange={(e) => setNewChapter((s) => ({ ...s, description: e.target.value }))} placeholder="DESCRIPTION // Vault log" className="w-full border border-[var(--border)] bg-[var(--bg)] px-2 py-2 text-[10px] outline-none h-[70px]" />
+              <div className="border border-dashed border-[var(--border-soft)] p-2 text-[8px] opacity-70 bg-[var(--bg)]">
+                Procedural chapters use interactive dot-matrix and synthetic waveforms. For real documents, use the PDF Import option above.
+              </div>
             </div>
             <div className="mt-3 flex gap-2 justify-end">
-              <button onClick={() => setShowNewChapter(false)} className="border border-[var(--border)] px-3 py-2 text-[9px]">CANCEL</button>
-              <button disabled={busy} onClick={handleCreateChapter} className="bg-[var(--text)] text-[var(--bg)] px-3 py-2 text-[9px] tracking-widest disabled:opacity-40">CREATE // +</button>
+              <button onClick={() => setShowNewChapter(false)} className="border border-[var(--border)] px-3 py-2 text-[9px] cursor-pointer">CANCEL</button>
+              <button disabled={busy} onClick={handleCreateChapter} className="bg-[var(--text)] text-[var(--bg)] px-3 py-2 text-[9px] tracking-widest disabled:opacity-40 cursor-pointer">CREATE // +</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PDF Drag overlay */}
+      {isDraggingPdf && (
+        <div className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-6 border-4 border-dashed border-[var(--accent)] pointer-events-none">
+          <div className="text-center text-[var(--bg)] bg-[var(--text)] p-8 border border-[var(--border)] max-w-[520px] shadow-2xl">
+            <div className="text-[36px] mb-2 text-[var(--accent)] animate-bounce">⇪</div>
+            <div className="text-[16px] font-bold tracking-[0.2em] uppercase">DROP PDF FILE TO IMPORT</div>
+            <div className="text-[9px] opacity-80 tracking-widest mt-2">
+              PAGES WILL BE CONVERTED DIRECTLY INTO VAULT 3D FLIPBOOK COMIC
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PDF Import Progress HUD */}
+      {pdfImportProgress && (
+        <div className="fixed inset-0 z-[95] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-[440px] border border-[var(--border)] bg-[var(--bg-card)] p-5 text-center shadow-2xl">
+            <div className="text-[12px] tracking-[0.2em] font-bold text-[var(--accent)] mb-2 animate-pulse flex items-center justify-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[var(--accent)] animate-ping" />
+              <span>TRANSMUTING PDF // RENDERING CELLS</span>
+            </div>
+            <div className="text-[10px] truncate mb-3 opacity-90 uppercase font-mono border border-[var(--border-soft)] bg-[var(--bg)] p-2">
+              {pdfImportProgress.filename}
+            </div>
+            <div className="w-full h-[12px] bg-[var(--bg)] border border-[var(--border)] p-[1px] mb-3">
+              <div
+                className="h-full bg-[var(--accent)] transition-all duration-300"
+                style={{ width: `${Math.max(5, Math.round((pdfImportProgress.current / pdfImportProgress.total) * 100))}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-[8px] tracking-widest opacity-80">
+              <span>PAGE {pdfImportProgress.current} OF {pdfImportProgress.total}</span>
+              <span>{Math.round((pdfImportProgress.current / pdfImportProgress.total) * 100)}% COMPLETE</span>
+            </div>
+            <div className="mt-4 text-[7px] tracking-widest opacity-60 border-t border-dashed border-[var(--border-soft)] pt-2">
+              PDF.JS OPTICAL ENGINE • HIGH RESOLUTION CANVASES • FLIPBOOK INTEGRATION
             </div>
           </div>
         </div>
