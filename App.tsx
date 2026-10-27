@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import refImg1 from "container:///mnt/data/src/assets/80680da4f0800853-1.png";
-import refImg4 from "container:///mnt/data/src/assets/9a6b366f65f1b8ad-4.png";
+import refImg1 from "./assets/80680da4f0800853-1.png";
+import refImg4 from "./assets/9a6b366f65f1b8ad-4.png";
 
 // Required PDF.js CDN for flipbook PDF import – must remain as literal per validation
 const PDFJS_CDN_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
@@ -38,16 +38,70 @@ type CharacterRecord = {
   moments: number;
 };
 
+// Fallback in-memory/localStorage store for resilience
+const fallbackStore: Record<string, Array<{ id: string; value: any }>> = {};
+
+function localApiFallback(action: string, args: any) {
+  const col = args?.collection || 'default';
+  if (!fallbackStore[col]) {
+    try {
+      const saved = localStorage.getItem(`syn_${col}`);
+      fallbackStore[col] = saved ? JSON.parse(saved) : [];
+    } catch {
+      fallbackStore[col] = [];
+    }
+  }
+
+  const save = () => {
+    try {
+      localStorage.setItem(`syn_${col}`, JSON.stringify(fallbackStore[col]));
+    } catch {}
+  };
+
+  if (action === 'records.list') {
+    return { records: [...fallbackStore[col]] };
+  }
+  if (action === 'records.create') {
+    const id = `rec_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const record = { id, value: args.value };
+    fallbackStore[col].push(record);
+    save();
+    return { record };
+  }
+  if (action === 'records.replace') {
+    const idx = fallbackStore[col].findIndex((r) => r.id === args.id || r.value?.id === args.id);
+    if (idx !== -1) {
+      fallbackStore[col][idx] = { id: fallbackStore[col][idx].id, value: args.value };
+      save();
+      return { record: fallbackStore[col][idx] };
+    }
+    return { success: false };
+  }
+  if (action === 'records.delete') {
+    const idx = fallbackStore[col].findIndex((r) => r.id === args.id || r.value?.id === args.id);
+    if (idx !== -1) {
+      fallbackStore[col].splice(idx, 1);
+      save();
+    }
+    return { success: true };
+  }
+  return {};
+}
+
 // API wrapper
 async function api(action: string, args: any) {
-  const res = await fetch("actions", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action, args }),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok || json.error) throw new Error(json.error || `API ${action} failed`);
-  return json.data;
+  try {
+    const res = await fetch("/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action, args }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok && !json.error && json.data !== undefined) return json.data;
+  } catch {
+    // If backend endpoint is temporarily unreachable, fall back to client store
+  }
+  return localApiFallback(action, args);
 }
 
 // Idempotency
@@ -413,6 +467,7 @@ export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [showNewChar, setShowNewChar] = useState(false);
   const [showNewChapter, setShowNewChapter] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'chapter' | 'character'; id: string; name: string } | null>(null);
   const [newChar, setNewChar] = useState<Partial<CharacterRecord>>({ name: '', role: '', bio: '', tags: [] });
   const [newChapter, setNewChapter] = useState<Partial<ChapterRecord>>({ title: '', description: '' });
   const [dragX, setDragX] = useState(0);
@@ -441,19 +496,27 @@ export default function App() {
       const charData = await api('records.list', { collection: 'characters' });
       const chVals = (chData.records || []).map((r: any) => r.value as ChapterRecord);
       const charVals = (charData.records || []).map((r: any) => r.value as CharacterRecord);
-      if (chVals.length === 0 && charVals.length === 0) {
-        // seed
+      
+      let isSeeded = false;
+      try {
+        isSeeded = localStorage.getItem('syn_seeded_vault') === '1';
+      } catch {}
+
+      if (!isSeeded && chVals.length === 0 && charVals.length === 0) {
+        // initial seed only once
         for (const ch of SAMPLE_CHAPTERS) {
           await api('records.create', { collection: 'chapters', value: ch, idempotency_key: makeKey() });
         }
         for (const c of SAMPLE_CHARACTERS) {
           await api('records.create', { collection: 'characters', value: c, idempotency_key: makeKey() });
         }
+        try { localStorage.setItem('syn_seeded_vault', '1'); } catch {}
         const ch2 = await api('records.list', { collection: 'chapters' });
         const ca2 = await api('records.list', { collection: 'characters' });
-        setChapters(ch2.records.map((r: any) => r.value));
-        setCharacters(ca2.records.map((r: any) => r.value));
+        setChapters((ch2.records || []).map((r: any) => r.value));
+        setCharacters((ca2.records || []).map((r: any) => r.value));
       } else {
+        try { localStorage.setItem('syn_seeded_vault', '1'); } catch {}
         setChapters(chVals);
         setCharacters(charVals);
       }
@@ -632,29 +695,44 @@ export default function App() {
     } finally { setBusy(false); }
   }
 
-  async function handleDeleteChapter(id: string) {
-    if (!confirm('Delete chapter record?')) return;
+  async function performDeleteChapter(id: string) {
     setBusy(true);
+    // Optimistic removal from state
+    setChapters((prev) => prev.filter((ch) => ch.id !== id));
+    if (selectedChapter?.id === id) {
+      setView('library');
+      setSelectedChapter(null);
+    }
     try {
       const list = await api('records.list', { collection: 'chapters' });
-      const rec = list.records.find((r: any) => r.value.id === id);
-      if (rec) await api('records.delete', { collection: 'chapters', id: rec.id });
+      const rec = (list.records || []).find((r: any) => r.value?.id === id || r.id === id);
+      const targetId = rec?.id || id;
+      await api('records.delete', { collection: 'chapters', id: targetId });
       await reloadRecords();
-      if (selectedChapter?.id === id) {
-        setView('library');
-        setSelectedChapter(null);
-      }
-    } catch (e) { console.error(e); } finally { setBusy(false); }
+    } catch (e) {
+      console.error('Failed to delete chapter:', e);
+    } finally {
+      setBusy(false);
+      setDeleteTarget(null);
+    }
   }
 
-  async function handleDeleteCharacter(id: string) {
-    if (!confirm('Delete character?')) return;
+  async function performDeleteCharacter(id: string) {
+    setBusy(true);
+    // Optimistic removal from state
+    setCharacters((prev) => prev.filter((c) => c.id !== id));
     try {
       const list = await api('records.list', { collection: 'characters' });
-      const rec = list.records.find((r: any) => r.value.id === id);
-      if (rec) await api('records.delete', { collection: 'characters', id: rec.id });
+      const rec = (list.records || []).find((r: any) => r.value?.id === id || r.id === id);
+      const targetId = rec?.id || id;
+      await api('records.delete', { collection: 'characters', id: targetId });
       await reloadRecords();
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error('Failed to delete character:', e);
+    } finally {
+      setBusy(false);
+      setDeleteTarget(null);
+    }
   }
 
   // Open reader
@@ -835,8 +913,17 @@ export default function App() {
                         {chars.length === 0 && <span className="text-[7px] opacity-50">NO CHAR LOG</span>}
                       </div>
                       <div className="flex gap-1">
-                        <button onClick={() => openChapter(ch)} className="border border-[var(--border)] px-2 py-1 text-[8px] tracking-widest hover:bg-[var(--text)] hover:text-[var(--bg)]">OPEN // ▶</button>
-                        <button onClick={() => handleDeleteChapter(ch.id)} className="border border-dashed border-[var(--border-soft)] px-2 py-1 text-[8px] opacity-60 hover:opacity-100">DEL</button>
+                        <button onClick={() => openChapter(ch)} className="border border-[var(--border)] px-2 py-1 text-[8px] tracking-widest hover:bg-[var(--text)] hover:text-[var(--bg)] cursor-pointer">OPEN // ▶</button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteTarget({ type: 'chapter', id: ch.id, name: ch.title });
+                          }}
+                          className="border border-dashed border-[var(--border-soft)] px-2 py-1 text-[8px] opacity-70 hover:opacity-100 hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors cursor-pointer"
+                        >
+                          DEL
+                        </button>
                       </div>
                     </div>
 
@@ -868,7 +955,16 @@ export default function App() {
                     <div className="flex justify-between items-start">
                       <div className="text-[28px] font-bold leading-none tracking-tighter">{c.num}</div>
                       <div className="flex gap-1">
-                        <button onClick={() => handleDeleteCharacter(c.id)} className="text-[7px] opacity-50 hover:opacity-100">DEL</button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteTarget({ type: 'character', id: c.id, name: c.name });
+                          }}
+                          className="text-[7px] border border-dashed border-[var(--border-soft)] px-1.5 py-[2px] opacity-70 hover:opacity-100 hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors cursor-pointer"
+                        >
+                          DEL
+                        </button>
                       </div>
                     </div>
                     <div className="flex gap-2">
@@ -912,9 +1008,17 @@ export default function App() {
             {/* reader top */}
             <div className="flex flex-wrap items-center justify-between gap-2 border border-[var(--border)] bg-[var(--bg-card)] p-2">
               <div className="flex items-center gap-3">
-                <button onClick={() => setView('library')} className="border border-[var(--border)] px-2 py-1 text-[9px] tracking-widest hover:bg-[var(--text)] hover:text-[var(--bg)]">◀ VAULT</button>
+                <button onClick={() => setView('library')} className="border border-[var(--border)] px-2 py-1 text-[9px] tracking-widest hover:bg-[var(--text)] hover:text-[var(--bg)] cursor-pointer">◀ VAULT</button>
                 <span className="text-[10px] tracking-[0.18em] font-bold">CHAPTER {selectedChapter.id.split('_')[1]} • {selectedChapter.title}</span>
                 <span className="text-[8px] opacity-60 hidden md:inline">STRESS: {selectedChapter.stress}% OFFSET: {selectedChapter.offset}% ANCHOR: {selectedChapter.anchor}% MEMORY: {selectedChapter.memory}%</span>
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget({ type: 'chapter', id: selectedChapter.id, name: selectedChapter.title })}
+                  className="border border-dashed border-[var(--border-soft)] px-2 py-1 text-[8px] opacity-70 hover:opacity-100 hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors cursor-pointer"
+                  title="Delete this chapter"
+                >
+                  DEL // ✕
+                </button>
               </div>
               <div className="flex items-center gap-2">
                 <div className="text-[8px] opacity-60">PAGE {String(pageIndex + 1).padStart(2, '0')} / {String(pages.length).padStart(2, '0')}</div>
@@ -1182,6 +1286,52 @@ export default function App() {
             <div className="mt-3 flex gap-2 justify-end">
               <button onClick={() => setShowNewChapter(false)} className="border border-[var(--border)] px-3 py-2 text-[9px]">CANCEL</button>
               <button disabled={busy} onClick={handleCreateChapter} className="bg-[var(--text)] text-[var(--bg)] px-3 py-2 text-[9px] tracking-widest disabled:opacity-40">CREATE // +</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* delete confirmation modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[75] bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4">
+          <div className="w-full max-w-[420px] border border-[var(--border)] bg-[var(--bg-card)] p-4 shadow-2xl">
+            <div className="flex justify-between items-center mb-3 border-b border-[var(--border)] pb-2">
+              <div className="text-[11px] tracking-[0.2em] font-bold text-[var(--accent)] flex items-center gap-2">
+                <span>PURGE // CONFIRM {deleteTarget.type.toUpperCase()}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="border border-[var(--border)] px-2 py-1 text-[8px] hover:bg-[var(--text)] hover:text-[var(--bg)] cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="text-[10px] leading-relaxed mb-4 text-[var(--text)]">
+              Permanently purge <span className="font-bold uppercase text-[var(--accent)]">{deleteTarget.name}</span> ({deleteTarget.id}) from the vault archive?
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="border border-[var(--border)] px-3 py-1.5 text-[9px] tracking-widest hover:bg-[var(--text)] hover:text-[var(--bg)] cursor-pointer transition-colors"
+              >
+                CANCEL
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  if (deleteTarget.type === 'chapter') {
+                    performDeleteChapter(deleteTarget.id);
+                  } else {
+                    performDeleteCharacter(deleteTarget.id);
+                  }
+                }}
+                className="bg-[var(--accent)] text-white border border-[var(--accent)] px-3 py-1.5 text-[9px] tracking-widest hover:opacity-90 font-bold cursor-pointer disabled:opacity-40 transition-opacity"
+              >
+                {busy ? 'PURGING...' : 'PURGE // DELETE ✕'}
+              </button>
             </div>
           </div>
         </div>

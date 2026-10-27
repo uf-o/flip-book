@@ -1,0 +1,8 @@
+{
+  "name": "Flip Book Vault",
+  "description": "Interactive flipbook reader and character archive with dot-matrix diagnostics and chapter vaults.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
