@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#1C1A17" rx="64"/>
+  <rect x="32" y="32" width="448" height="448" fill="#24211D" rx="48" stroke="#FF3B30" stroke-width="4"/>
+  <!-- Flipbook icon -->
+  <path d="M110 140 C110 140 180 120 256 140 C332 120 402 140 402 140 L402 360 C332 340 256 360 256 360 C180 340 110 360 110 360 Z" fill="#E8E0C9"/>
+  <!-- Spine -->
+  <line x1="256" y1="140" x2="256" y2="360" stroke="#1C1A17" stroke-width="8"/>
+  <!-- Flip page effect -->
+  <path d="M256 140 C280 130 330 145 350 180 L350 340 C320 320 270 330 256 360 Z" fill="#DDD5BE" opacity="0.9"/>
+  <!-- Tech dot matrix accent -->
+  <circle cx="160" cy="200" r="8" fill="#1C1A17"/>
+  <circle cx="190" cy="200" r="8" fill="#1C1A17"/>
+  <circle cx="220" cy="200" r="8" fill="#FF3B30"/>
+  <circle cx="160" cy="230" r="8" fill="#1C1A17"/>
+  <circle cx="190" cy="230" r="8" fill="#2A9D8F"/>
+  <circle cx="220" cy="230" r="8" fill="#1C1A17"/>
+  <!-- Decorative text/stamp -->
+  <text x="256" y="420" font-family="monospace" font-size="28" font-weight="bold" fill="#E8E0C9" text-anchor="middle" letter-spacing="4">SYN / VAULT</text>
+  <rect x="236" y="70" width="40" height="8" fill="#FF3B30"/>
+</svg>

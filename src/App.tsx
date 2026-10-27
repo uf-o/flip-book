@@ -1,6 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import refImg1 from "./assets/80680da4f0800853-1.png";
 import refImg4 from "./assets/9a6b366f65f1b8ad-4.png";
+import {
+  offlineGetRecords,
+  offlineSaveRecords,
+  offlineCreateRecord,
+  offlineReplaceRecord,
+  offlineDeleteRecord,
+} from './db';
+import { PWAInstallButton } from './PWAInstallButton';
+import { OfflineIndicator } from './OfflineIndicator';
 
 // Required PDF.js CDN for flipbook PDF import – must remain as literal per validation
 const PDFJS_CDN_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
@@ -40,70 +49,94 @@ type CharacterRecord = {
   moments: number;
 };
 
-// Fallback in-memory/localStorage store for resilience
-const fallbackStore: Record<string, Array<{ id: string; value: any }>> = {};
-
-function localApiFallback(action: string, args: any) {
+// Offline-first data layer with IndexedDB & remote sync
+async function api(action: string, args: any) {
   const col = args?.collection || 'default';
-  if (!fallbackStore[col]) {
-    try {
-      const saved = localStorage.getItem(`syn_${col}`);
-      fallbackStore[col] = saved ? JSON.parse(saved) : [];
-    } catch {
-      fallbackStore[col] = [];
-    }
-  }
-
-  const save = () => {
-    try {
-      localStorage.setItem(`syn_${col}`, JSON.stringify(fallbackStore[col]));
-    } catch {}
-  };
 
   if (action === 'records.list') {
-    return { records: [...fallbackStore[col]] };
+    // Try remote first if online
+    try {
+      const res = await fetch("/actions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action, args }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && !json.error && Array.isArray(json.data?.records)) {
+        if (json.data.records.length > 0) {
+          await offlineSaveRecords(col, json.data.records);
+        } else {
+          // If remote is empty, check if we have offline records created while offline
+          const localRecords = await offlineGetRecords(col);
+          if (localRecords.length > 0) {
+            // Push offline records to server
+            for (const r of localRecords) {
+              await fetch("/actions", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ action: 'records.create', args: { collection: col, value: r.value } }),
+              }).catch(() => {});
+            }
+            return { records: localRecords };
+          }
+        }
+        return json.data;
+      }
+    } catch {
+      // Offline mode
+    }
+
+    // Offline fallback: load cached records from IndexedDB
+    const offlineRecords = await offlineGetRecords(col);
+    return { records: offlineRecords };
   }
+
   if (action === 'records.create') {
-    const id = `rec_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const record = { id, value: args.value };
-    fallbackStore[col].push(record);
-    save();
-    return { record };
+    // Save to IndexedDB immediately for instant offline availability
+    const offlineRecord = await offlineCreateRecord(col, args.value);
+
+    // Also attempt remote sync in background
+    try {
+      const res = await fetch("/actions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action, args }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.data?.record) return json.data;
+    } catch {
+      // Offline
+    }
+    return { record: offlineRecord };
   }
+
   if (action === 'records.replace') {
-    const idx = fallbackStore[col].findIndex((r) => r.id === args.id || r.value?.id === args.id);
-    if (idx !== -1) {
-      fallbackStore[col][idx] = { id: fallbackStore[col][idx].id, value: args.value };
-      save();
-      return { record: fallbackStore[col][idx] };
-    }
-    return { success: false };
-  }
-  if (action === 'records.delete') {
-    const idx = fallbackStore[col].findIndex((r) => r.id === args.id || r.value?.id === args.id);
-    if (idx !== -1) {
-      fallbackStore[col].splice(idx, 1);
-      save();
-    }
+    await offlineReplaceRecord(col, args.id, args.value);
+    try {
+      const res = await fetch("/actions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action, args }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.data) return json.data;
+    } catch {}
     return { success: true };
   }
-  return {};
-}
 
-// API wrapper
-async function api(action: string, args: any) {
-  try {
-    const res = await fetch("/actions", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action, args }),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (res.ok && !json.error && json.data !== undefined) return json.data;
-  } catch {
-    // If backend endpoint is temporarily unreachable, fall back to client store
+  if (action === 'records.delete') {
+    await offlineDeleteRecord(col, args.id);
+    try {
+      await fetch("/actions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action, args }),
+      }).catch(() => {});
+    } catch {}
+    return { success: true };
   }
-  return localApiFallback(action, args);
+
+  return {};
 }
 
 // Idempotency
@@ -938,9 +971,10 @@ export default function App() {
             <span className="opacity-60">{time}</span>
             <span className="hidden md:inline">◍ SIGNAL 84%</span>
             <span className="border border-[var(--border)] px-[6px] py-[1px] text-[9px]">◫ 78%</span>
+            <PWAInstallButton />
             <button
               onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
-              className="border border-[var(--border)] px-2 py-[2px] hover:bg-[var(--text)] hover:text-[var(--bg)] transition-colors"
+              className="border border-[var(--border)] px-2 py-[2px] hover:bg-[var(--text)] hover:text-[var(--bg)] transition-colors cursor-pointer"
             >
               {theme === 'light' ? 'DARK // 01' : 'LIGHT // 00'}
             </button>
@@ -1594,6 +1628,9 @@ export default function App() {
 
       {/* busy overlay */}
       {busy && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[70] border border-[var(--border)] bg-[var(--text)] text-[var(--bg)] px-3 py-1 text-[9px] tracking-widest">SYNCING VAULT // PLEASE WAIT...</div>}
+
+      {/* Offline Status Bar */}
+      <OfflineIndicator />
         </>
       )}
     </div>
