@@ -1,0 +1,64 @@
+[
+  {
+    "path": "App.tsx",
+    "file": {
+      "file_name": "/mnt/data/src/App.tsx",
+      "storage_handle": "",
+      "storage_type": "BASE64"
+    }
+  },
+  {
+    "path": "assets/80680da4f0800853-1.png",
+    "file": {
+      "file_name": "1.png",
+      "storage_handle": "",
+      "storage_type": "MANIFOLD",
+      "mime": "image/png",
+      "source_identifiers": [
+        {
+          "type": "typed_fbid",
+          "value": {
+            "fbid": 2286129322170546,
+            "fbtype": 71334
+          }
+        },
+        {
+          "type": "url",
+          "value": "safetynet_input_media://74258533dd9e4e52ad0dbc2ae022cd65"
+        }
+      ],
+      "media_origin": "USER_UPLOAD"
+    }
+  },
+  {
+    "path": "assets/9a6b366f65f1b8ad-4.png",
+    "file": {
+      "file_name": "4.png",
+      "storage_handle": "",
+      "storage_type": "MANIFOLD",
+      "mime": "image/png",
+      "source_identifiers": [
+        {
+          "type": "typed_fbid",
+          "value": {
+            "fbid": 2317887669057114,
+            "fbtype": 71334
+          }
+        },
+        {
+          "type": "url",
+          "value": "safetynet_input_media://c316ed46ed8f42dd804159aa1f0fa8e1"
+        }
+      ],
+      "media_origin": "USER_UPLOAD"
+    }
+  },
+  {
+    "path": "index.css",
+    "file": {
+      "file_name": "/mnt/data/src/index.css",
+      "storage_handle": "",
+      "storage_type": "BASE64"
+    }
+  }
+]
