@@ -609,7 +609,7 @@ export default function App() {
       refreshing = true;
       try { await reloadRecords(); } finally { refreshing = false; }
     };
-    const interval = window.setInterval(refresh, 5000);
+    const interval = window.setInterval(refresh, 15000);
     const onFocus = () => { void refresh(); };
     const onVisibility = () => { if (document.visibilityState === 'visible') void refresh(); };
     window.addEventListener('focus', onFocus);
