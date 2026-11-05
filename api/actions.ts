@@ -94,7 +94,7 @@ export default async function handler(req: any, res: any) {
     return respond(res, 200, { data: { isAdmin: true } });
   }
 
-  if (action !== "records.list" && !validAdminSession(req)) return respond(res, 401, { error: "Administrator access required. Sign in to manage this shared library." });
+  if (action !== "records.list" && action !== "media.getChunk" && !validAdminSession(req)) return respond(res, 401, { error: "Administrator access required. Sign in to manage this shared library." });
   if (!process.env.MEDIA_LIBRARY_SYNC) return respond(res, 503, { error: "Shared database is not configured. Configure MEDIA_LIBRARY_SYNC in Vercel Environment Variables." });
 
   const collection = String(args.collection || "default");
