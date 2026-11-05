@@ -9,6 +9,7 @@ import {
   offlineDeleteRecord,
 } from './db';
 import { PWAInstallButton } from './PWAInstallButton';
+import { AdminAccess } from './AdminAccess';
 import { OfflineIndicator } from './OfflineIndicator';
 import { FullscreenPageModal } from './FullscreenPageModal';
 
@@ -584,6 +585,7 @@ export default function App() {
   const [chapters, setChapters] = useState<ChapterRecord[]>([]);
   const [characters, setCharacters] = useState<CharacterRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showChars, setShowChars] = useState(false);
   const [search, setSearch] = useState('');
@@ -878,7 +880,7 @@ export default function App() {
 
   // Create character
   async function handleCreateChar() {
-    if (!newChar.name) return;
+    if (!isAdmin || !newChar.name) return;
     setBusy(true);
     try {
       const id = `char_${Date.now()}`;
@@ -909,7 +911,7 @@ export default function App() {
   }
 
   async function handleCreateChapter() {
-    if (!newChapter.title) return;
+    if (!isAdmin || !newChapter.title) return;
     setBusy(true);
     try {
       const id = `ch_${Date.now()}`;
@@ -936,6 +938,7 @@ export default function App() {
   }
 
   async function performDeleteChapter(id: string) {
+    if (!isAdmin) return;
     setBusy(true);
     // Optimistic removal from state
     setChapters((prev) => prev.filter((ch) => ch.id !== id));
@@ -958,6 +961,7 @@ export default function App() {
   }
 
   async function performDeleteCharacter(id: string) {
+    if (!isAdmin) return;
     setBusy(true);
     // Optimistic removal from state
     setCharacters((prev) => prev.filter((c) => c.id !== id));
@@ -1030,6 +1034,7 @@ export default function App() {
             <span className="hidden md:inline">◍ SIGNAL 84%</span>
             <span className="border border-[var(--border)] px-[6px] py-[1px] text-[9px]">◫ 78%</span>
             <PWAInstallButton />
+            <AdminAccess onStatusChange={setIsAdmin} />
             <button
               onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
               className="border border-[var(--border)] px-2 py-[2px] hover:bg-[var(--text)] hover:text-[var(--bg)] transition-colors cursor-pointer"
@@ -1578,7 +1583,7 @@ export default function App() {
       </main>
 
       {/* modals */}
-      {showNewChar && (
+      {isAdmin && showNewChar && (
         <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px] flex items-center justify-center p-4">
           <div className="w-full max-w-[480px] border border-[var(--border)] bg-[var(--bg-card)] p-4">
             <div className="flex justify-between items-center mb-3">
@@ -1600,7 +1605,7 @@ export default function App() {
         </div>
       )}
 
-      {showNewChapter && (
+      {isAdmin && showNewChapter && (
         <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px] flex items-center justify-center p-4">
           <div className="w-full max-w-[480px] border border-[var(--border)] bg-[var(--bg-card)] p-4 shadow-2xl">
             <div className="flex justify-between items-center mb-3">
@@ -1684,7 +1689,7 @@ export default function App() {
       )}
 
       {/* delete confirmation modal */}
-      {deleteTarget && (
+      {isAdmin && deleteTarget && (
         <div className="fixed inset-0 z-[75] bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4">
           <div className="w-full max-w-[420px] border border-[var(--border)] bg-[var(--bg-card)] p-4 shadow-2xl">
             <div className="flex justify-between items-center mb-3 border-b border-[var(--border)] pb-2">
