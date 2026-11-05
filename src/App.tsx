@@ -10,6 +10,7 @@ import {
 } from './db';
 import { PWAInstallButton } from './PWAInstallButton';
 import { OfflineIndicator } from './OfflineIndicator';
+import { FullscreenPageModal } from './FullscreenPageModal';
 
 // Required PDF.js CDN for flipbook PDF import – must remain as literal per validation
 const PDFJS_CDN_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
@@ -334,24 +335,64 @@ function Waveform({ stress = 55 }: { stress?: number }) {
   );
 }
 
-function ComicPageContent({ pageNum, chapter, char }: { pageNum: number; chapter: ChapterRecord; char?: CharacterRecord[] }) {
+function ComicPageContent({
+  pageNum,
+  chapter,
+  char,
+  onOpenFullscreen,
+  isFullscreen = false,
+}: {
+  pageNum: number;
+  chapter: ChapterRecord;
+  char?: CharacterRecord[];
+  onOpenFullscreen?: (pageNum: number) => void;
+  isFullscreen?: boolean;
+}) {
   // If chapter contains extracted PDF pages, render the real page!
   if (chapter.pages && chapter.pages[pageNum]) {
     return (
       <div className="w-full h-full bg-[var(--paper)] text-[var(--text)] p-[6px] md:p-[8px] flex flex-col paper-texture overflow-hidden relative select-none">
         {/* header strip */}
-        <div className="flex justify-between text-[8px] tracking-[0.18em] border-b border-[var(--border-soft)] pb-[4px] uppercase opacity-75 shrink-0">
-          <span className="truncate max-w-[70%]">{chapter.vault} // {chapter.title}</span>
-          <span>P{String(pageNum + 1).padStart(2, '0')}/{String(chapter.pageCount).padStart(2, '0')} • PDF</span>
+        <div className="flex justify-between items-center text-[8px] tracking-[0.18em] border-b border-[var(--border-soft)] pb-[4px] uppercase opacity-80 shrink-0">
+          <span className="truncate max-w-[55%]">{chapter.vault} // {chapter.title}</span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span>P{String(pageNum + 1).padStart(2, '0')}/{String(chapter.pageCount).padStart(2, '0')} • PDF</span>
+            {onOpenFullscreen && !isFullscreen && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenFullscreen(pageNum);
+                }}
+                className="border border-[var(--border)] bg-[var(--accent)] text-white px-1.5 py-[1px] text-[7px] font-bold tracking-widest hover:opacity-85 transition-opacity cursor-pointer flex items-center gap-1 shadow-sm"
+                title="Afficher cette page en plein écran"
+              >
+                <span>⛶</span>
+                <span>PLEIN ÉCRAN</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* page frame */}
-        <div className="flex-1 w-full h-full min-h-0 relative overflow-hidden flex items-center justify-center bg-black/5 dark:bg-white/5 border border-[var(--border-soft)] p-1">
+        <div
+          className="flex-1 w-full h-full min-h-0 relative overflow-hidden flex items-center justify-center bg-black/5 dark:bg-white/5 border border-[var(--border-soft)] p-1 group"
+          onClick={() => {
+            if (onOpenFullscreen && !isFullscreen) onOpenFullscreen(pageNum);
+          }}
+          style={{ cursor: onOpenFullscreen && !isFullscreen ? 'zoom-in' : 'default' }}
+          title={onOpenFullscreen && !isFullscreen ? 'Cliquer pour afficher cette page en plein écran' : undefined}
+        >
           <img
             src={chapter.pages[pageNum]}
             alt={`Page ${pageNum + 1}`}
             className="w-full h-full object-contain pointer-events-none select-none drop-shadow-sm"
           />
+          {onOpenFullscreen && !isFullscreen && (
+            <div className="absolute bottom-2 right-2 bg-[var(--text)] text-[var(--bg)] px-2 py-1 text-[7px] font-bold tracking-widest opacity-0 group-hover:opacity-90 transition-opacity flex items-center gap-1 shadow border border-[var(--border)] pointer-events-none">
+              <span>⛶ PLEIN ÉCRAN</span>
+            </div>
+          )}
         </div>
 
         {/* footer telemetry */}
@@ -371,9 +412,25 @@ function ComicPageContent({ pageNum, chapter, char }: { pageNum: number; chapter
   return (
     <div className="w-full h-full bg-[var(--paper)] text-[var(--text)] p-[10px] flex flex-col gap-[8px] paper-texture overflow-hidden relative">
       {/* header strip */}
-      <div className="flex justify-between text-[8px] tracking-[0.18em] border-b border-[var(--border-soft)] pb-[4px] uppercase opacity-70">
-        <span>{chapter.vault} // {chapter.title}</span>
-        <span>P{String(pageNum + 1).padStart(2, '0')} // {formatTime()}</span>
+      <div className="flex justify-between items-center text-[8px] tracking-[0.18em] border-b border-[var(--border-soft)] pb-[4px] uppercase opacity-75 shrink-0">
+        <span className="truncate max-w-[55%]">{chapter.vault} // {chapter.title}</span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span>P{String(pageNum + 1).padStart(2, '0')} // {formatTime()}</span>
+          {onOpenFullscreen && !isFullscreen && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenFullscreen(pageNum);
+              }}
+              className="border border-[var(--border)] bg-[var(--bg)] px-1.5 py-[1px] text-[7px] font-bold tracking-widest hover:bg-[var(--text)] hover:text-[var(--bg)] transition-colors cursor-pointer flex items-center gap-1 shadow-sm"
+              title="Afficher cette page en plein écran"
+            >
+              <span>⛶</span>
+              <span>PLEIN ÉCRAN</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {panelType === 0 && (
@@ -539,6 +596,7 @@ export default function App() {
   const [dragX, setDragX] = useState(0);
   const dragRef = useRef<{ startX: number; dragging: boolean }>({ startX: 0, dragging: false });
   const containerRef = useRef<HTMLDivElement>(null);
+  const [fullscreenPage, setFullscreenPage] = useState<number | null>(null);
   const [pdfImportProgress, setPdfImportProgress] = useState<{ current: number; total: number; filename: string } | null>(null);
   const [isDraggingPdf, setIsDraggingPdf] = useState(false);
   const pdfInputRef = useRef<HTMLInputElement>(null);
@@ -666,7 +724,7 @@ export default function App() {
 
   // Keyboard
   useEffect(() => {
-    if (view !== 'reader') return;
+    if (view !== 'reader' || fullscreenPage !== null) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight' || e.key === ' ') doNext();
       if (e.key === 'ArrowLeft') doPrev();
@@ -674,7 +732,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [view, pageIndex, pages, isFlipping]);
+  }, [view, pageIndex, pages, isFlipping, fullscreenPage]);
 
   // Drag
   const onPointerDown = (e: React.PointerEvent) => {
@@ -1248,7 +1306,31 @@ export default function App() {
               </div>
               <div className="flex items-center gap-2">
                 <div className="text-[8px] opacity-60">PAGE {String(pageIndex + 1).padStart(2, '0')} / {String(pages.length).padStart(2, '0')}</div>
-                <button onClick={() => setShowChars((s) => !s)} className="bg-[var(--text)] text-[var(--bg)] px-3 py-1 text-[9px] tracking-[0.2em] border border-[var(--text)]">
+                <div className="flex items-center gap-1">
+                  {pages[pageIndex] !== undefined && (
+                    <button
+                      type="button"
+                      onClick={() => setFullscreenPage(pages[pageIndex])}
+                      className="border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[8px] tracking-widest hover:bg-[var(--text)] hover:text-[var(--bg)] cursor-pointer flex items-center gap-1 font-bold transition-colors"
+                      title="Afficher page gauche en plein écran"
+                    >
+                      <span>⛶</span>
+                      <span>P{String(pages[pageIndex] + 1).padStart(2, '0')}</span>
+                    </button>
+                  )}
+                  {pages[pageIndex + 1] !== undefined && (
+                    <button
+                      type="button"
+                      onClick={() => setFullscreenPage(pages[pageIndex + 1])}
+                      className="border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[8px] tracking-widest hover:bg-[var(--text)] hover:text-[var(--bg)] cursor-pointer flex items-center gap-1 font-bold transition-colors"
+                      title="Afficher page droite en plein écran"
+                    >
+                      <span>⛶</span>
+                      <span>P{String(pages[pageIndex + 1] + 1).padStart(2, '0')}</span>
+                    </button>
+                  )}
+                </div>
+                <button onClick={() => setShowChars((s) => !s)} className="bg-[var(--text)] text-[var(--bg)] px-3 py-1 text-[9px] tracking-[0.2em] border border-[var(--text)] cursor-pointer">
                   CHAR LOG [{String(chapterChars.length).padStart(2, '0')}] {showChars ? '▼' : '▲'}
                 </button>
               </div>
@@ -1268,7 +1350,12 @@ export default function App() {
                   {/* left */}
                   <div className="flex-1 bg-[var(--paper)] relative overflow-hidden page">
                     {pages[pageIndex] !== undefined ? (
-                      <ComicPageContent pageNum={pages[pageIndex]} chapter={selectedChapter} char={chapterChars} />
+                      <ComicPageContent
+                        pageNum={pages[pageIndex]}
+                        chapter={selectedChapter}
+                        char={chapterChars}
+                        onOpenFullscreen={setFullscreenPage}
+                      />
                     ) : (
                       <div className="w-full h-full bg-[var(--bg-soft)] flex items-center justify-center text-[10px] opacity-40">END OF VAULT</div>
                     )}
@@ -1278,7 +1365,12 @@ export default function App() {
                   {/* right */}
                   <div className="flex-1 bg-[var(--paper)] relative overflow-hidden page">
                     {pages[pageIndex + 1] !== undefined ? (
-                      <ComicPageContent pageNum={pages[pageIndex + 1]} chapter={selectedChapter} char={chapterChars} />
+                      <ComicPageContent
+                        pageNum={pages[pageIndex + 1]}
+                        chapter={selectedChapter}
+                        char={chapterChars}
+                        onOpenFullscreen={setFullscreenPage}
+                      />
                     ) : (
                       <div className="w-full h-full bg-[var(--bg-soft)] flex items-center justify-center text-[10px] opacity-40">—</div>
                     )}
@@ -1358,12 +1450,23 @@ export default function App() {
 
               {/* controls */}
               <div className="mt-3 max-w-[980px] mx-auto flex items-center justify-between gap-2 text-[9px]">
-                <div className="flex gap-2">
-                  <button disabled={!canPrev} onClick={doPrev} className="border border-[var(--border)] px-3 py-2 disabled:opacity-30 hover:bg-[var(--text)] hover:text-[var(--bg)]">◀ PREV [←]</button>
-                  <button disabled={!canNext} onClick={doNext} className="border border-[var(--border)] px-3 py-2 disabled:opacity-30 hover:bg-[var(--text)] hover:text-[var(--bg)]">NEXT ▶ [→ / SPACE]</button>
+                <div className="flex gap-2 items-center flex-wrap">
+                  <button disabled={!canPrev} onClick={doPrev} className="border border-[var(--border)] px-3 py-2 disabled:opacity-30 hover:bg-[var(--text)] hover:text-[var(--bg)] cursor-pointer transition-colors">◀ PREV [←]</button>
+                  <button disabled={!canNext} onClick={doNext} className="border border-[var(--border)] px-3 py-2 disabled:opacity-30 hover:bg-[var(--text)] hover:text-[var(--bg)] cursor-pointer transition-colors">NEXT ▶ [→ / SPACE]</button>
+                  {pages[pageIndex] !== undefined && (
+                    <button
+                      type="button"
+                      onClick={() => setFullscreenPage(pages[pageIndex])}
+                      className="border border-[var(--accent)] bg-[var(--accent)] text-white px-3 py-2 font-bold tracking-widest hover:opacity-90 cursor-pointer flex items-center gap-1.5 shadow-sm transition-opacity"
+                      title="Afficher la page en mode plein écran haute résolution"
+                    >
+                      <span className="text-[11px]">⛶</span>
+                      <span>PLEIN ÉCRAN</span>
+                    </button>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 text-[7px] opacity-60">
-                  <span>DRAG TO FLIP • CLICK EDGES • ARROWS • SPACE</span>
+                  <span>DRAG TO FLIP • CLICK EDGES • ARROWS • SPACE • ⛶ FULLSCREEN</span>
                   <img src={refImg1} alt="" className="w-[24px] h-[24px] object-cover border border-[var(--border-soft)] grayscale opacity-50" />
                 </div>
               </div>
@@ -1628,6 +1731,29 @@ export default function App() {
 
       {/* busy overlay */}
       {busy && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[70] border border-[var(--border)] bg-[var(--text)] text-[var(--bg)] px-3 py-1 text-[9px] tracking-widest">SYNCING VAULT // PLEASE WAIT...</div>}
+
+      {/* Fullscreen Page Modal */}
+      {fullscreenPage !== null && selectedChapter && (
+        <FullscreenPageModal
+          chapter={selectedChapter}
+          pageIndex={fullscreenPage}
+          totalPages={pages.length}
+          onClose={() => setFullscreenPage(null)}
+          onNavigate={(p) => {
+            setFullscreenPage(p);
+            // sync flipbook to matching 2-page spread
+            setPageIndex(p % 2 === 0 ? p : p - 1);
+          }}
+          renderPage={(p) => (
+            <ComicPageContent
+              pageNum={p}
+              chapter={selectedChapter}
+              char={chapterChars}
+              isFullscreen
+            />
+          )}
+        />
+      )}
 
       {/* Offline Status Bar */}
       <OfflineIndicator />
