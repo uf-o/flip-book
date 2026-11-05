@@ -9,7 +9,8 @@ const COOKIE = "media_admin_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 7;
 
 type RecordItem = { id: string; value: any };
-type Database = { version: number; updatedAt: string; collections: Record<string, RecordItem[]> };
+type MediaFile = { contentType: string; size: number; totalChunks: number; chunks: string[]; updatedAt: string };
+type Database = { version: number; updatedAt: string; collections: Record<string, RecordItem[]>; mediaFiles?: Record<string, MediaFile> };
 
 function respond(res: any, status: number, body: unknown) {
   res.setHeader("Cache-Control", "no-store");
@@ -44,13 +45,21 @@ function githubHeaders() {
   return { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
 }
 async function readDatabase(): Promise<{ db: Database; sha?: string }> {
-  const response = await fetch(`${API}/repos/${OWNER}/${REPO}/contents/${FILE_PATH}?ref=${encodeURIComponent(BRANCH)}`, { headers: githubHeaders() });
-  if (response.status === 404) return { db: { version: 1, updatedAt: new Date().toISOString(), collections: {} } };
+  const url = `${API}/repos/${OWNER}/${REPO}/contents/${FILE_PATH}?ref=${encodeURIComponent(BRANCH)}`;
+  const response = await fetch(url, { headers: githubHeaders() });
+  if (response.status === 404) return { db: { version: 1, updatedAt: new Date().toISOString(), collections: {}, mediaFiles: {} } };
   if (!response.ok) throw new Error(`GitHub read failed (${response.status}): ${await response.text()}`);
-  const file = await response.json() as { content: string; sha: string };
-  const decoded = Buffer.from(file.content.replace(/\\n/g, ""), "base64").toString("utf8");
+  const file = await response.json() as { content?: string; sha: string };
+  let decoded = "";
+  if (file.content) decoded = Buffer.from(file.content.replace(/\\n/g, ""), "base64").toString("utf8");
+  else {
+    const raw = await fetch(url, { headers: { ...githubHeaders(), Accept: "application/vnd.github.raw+json" } });
+    if (!raw.ok) throw new Error(`GitHub raw read failed (${raw.status}): ${await raw.text()}`);
+    decoded = await raw.text();
+  }
   const parsed = JSON.parse(decoded) as Database;
   if (!parsed || typeof parsed !== "object" || !parsed.collections || typeof parsed.collections !== "object") throw new Error("database.json has an invalid structure");
+  if (!parsed.mediaFiles) parsed.mediaFiles = {};
   return { db: parsed, sha: file.sha };
 }
 async function writeDatabase(db: Database, sha?: string) {
@@ -92,6 +101,43 @@ export default async function handler(req: any, res: any) {
   if (!/^[a-zA-Z0-9_-]{1,80}$/.test(collection)) return respond(res, 400, { error: "Invalid collection" });
 
   try {
+    if (action === "media.chunk") {
+      const mediaId = String(args.mediaId || "");
+      const index = Number(args.index);
+      const totalChunks = Number(args.totalChunks);
+      const chunk = String(args.chunkBase64 || "");
+      if (!/^[a-zA-Z0-9_-]{1,120}$/.test(mediaId) || !Number.isInteger(index) || index < 0 || !Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks > 2000 || index >= totalChunks || !chunk || chunk.length > 3600000) return respond(res, 400, { error: "Invalid media chunk" });
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const { db, sha } = await readDatabase();
+        const previous = db.mediaFiles![mediaId];
+        const entry: MediaFile = previous || { contentType: String(args.contentType || "application/octet-stream").slice(0, 120), size: Math.max(0, Number(args.size) || 0), totalChunks, chunks: Array(totalChunks).fill(""), updatedAt: new Date().toISOString() };
+        if (entry.totalChunks !== totalChunks) return respond(res, 409, { error: "Media upload metadata mismatch" });
+        entry.chunks[index] = chunk;
+        entry.updatedAt = new Date().toISOString();
+        db.mediaFiles![mediaId] = entry;
+        db.updatedAt = entry.updatedAt;
+        try { await writeDatabase(db, sha); return respond(res, 200, { data: { success: true, index, totalChunks } }); }
+        catch (error) { const message = error instanceof Error ? error.message : String(error); if ((!message.includes("(409)") && !message.includes("(422)")) || attempt === 3) throw error; }
+      }
+      return respond(res, 409, { error: "Database changed concurrently. Please retry the media chunk." });
+    }
+    if (action === "media.getChunk") {
+      const mediaId = String(args.mediaId || "");
+      const index = Number(args.index);
+      const { db } = await readDatabase();
+      const entry = db.mediaFiles?.[mediaId];
+      if (!entry || !Number.isInteger(index) || index < 0 || index >= entry.totalChunks || !entry.chunks[index]) return respond(res, 404, { error: "Media chunk not found" });
+      return respond(res, 200, { data: { chunkBase64: entry.chunks[index], contentType: entry.contentType, size: entry.size, totalChunks: entry.totalChunks } });
+    }
+    if (action === "media.delete") {
+      const mediaId = String(args.mediaId || "");
+      if (!mediaId) return respond(res, 400, { error: "Media id is required" });
+      const { db, sha } = await readDatabase();
+      delete db.mediaFiles![mediaId];
+      db.updatedAt = new Date().toISOString();
+      await writeDatabase(db, sha);
+      return respond(res, 200, { data: { success: true } });
+    }
     if (action === "records.list") {
       const { db } = await readDatabase();
       const records = db.collections[collection] || [];
