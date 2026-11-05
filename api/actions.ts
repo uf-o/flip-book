@@ -39,8 +39,8 @@ function validAdminSession(req: any): boolean {
   } catch { return false; }
 }
 function githubHeaders() {
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) throw new Error("Server configuration missing: GITHUB_TOKEN");
+  const token = process.env.MEDIA_LIBRARY_SYNC;
+  if (!token) throw new Error("Server configuration missing: MEDIA_LIBRARY_SYNC");
   return { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
 }
 async function readDatabase(): Promise<{ db: Database; sha?: string }> {
@@ -86,7 +86,7 @@ export default async function handler(req: any, res: any) {
   }
 
   if (action !== "records.list" && !validAdminSession(req)) return respond(res, 401, { error: "Administrator access required. Sign in to manage this shared library." });
-  if (!process.env.GITHUB_TOKEN) return respond(res, 503, { error: "Shared database is not configured. Add GITHUB_TOKEN to Vercel Environment Variables." });
+  if (!process.env.MEDIA_LIBRARY_SYNC) return respond(res, 503, { error: "Shared database is not configured. Configure MEDIA_LIBRARY_SYNC in Vercel Environment Variables." });
 
   const collection = String(args.collection || "default");
   if (!/^[a-zA-Z0-9_-]{1,80}$/.test(collection)) return respond(res, 400, { error: "Invalid collection" });
