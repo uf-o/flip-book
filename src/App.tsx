@@ -710,6 +710,7 @@ export default function App() {
 
   // Import PDF as flipbook chapter
   async function handlePdfFile(file: File) {
+    if (!isAdmin) return;
     if (!file || !file.name.toLowerCase().endsWith('.pdf')) {
       alert('PLEASE SELECT A VALID PDF FILE (.pdf)');
       return;
@@ -1047,14 +1048,16 @@ export default function App() {
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
-                  onClick={() => setShowNewChapter(true)}
+                  disabled={!isAdmin}
+                  onClick={() => isAdmin && setShowNewChapter(true)}
                   className="border border-[var(--border)] bg-[var(--text)] text-[var(--bg)] px-3 py-2 text-[10px] tracking-[0.18em] hover:opacity-80 cursor-pointer"
                 >
                   NEW CHAPTER // +
                 </button>
                 <button
                   type="button"
-                  onClick={() => pdfInputRef.current?.click()}
+                  disabled={!isAdmin}
+                  onClick={() => isAdmin && pdfInputRef.current?.click()}
                   className="border border-[var(--border)] bg-[var(--accent)] text-white px-3 py-2 text-[10px] tracking-[0.18em] font-bold hover:opacity-90 flex items-center gap-1.5 cursor-pointer shadow-sm transition-transform active:scale-95"
                 >
                   <span>IMPORT PDF // ⇪</span>
@@ -1148,8 +1151,10 @@ export default function App() {
                         <button onClick={() => openChapter(ch)} className="border border-[var(--border)] px-2 py-1 text-[8px] tracking-widest hover:bg-[var(--text)] hover:text-[var(--bg)] cursor-pointer">OPEN // ▶</button>
                         <button
                           type="button"
+                          disabled={!isAdmin}
                           onClick={(e) => {
                             e.stopPropagation();
+                            if (!isAdmin) return;
                             setDeleteTarget({ type: 'chapter', id: ch.id, name: ch.title });
                           }}
                           className="border border-dashed border-[var(--border-soft)] px-2 py-1 text-[8px] opacity-70 hover:opacity-100 hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors cursor-pointer"
@@ -1178,7 +1183,8 @@ export default function App() {
                     placeholder="SEARCH // NAME, TAG, ROLE"
                     className="border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[9px] tracking-widest w-[180px] outline-none"
                   />
-                  <button onClick={() => setShowNewChar(true)} className="border border-[var(--border)] px-2 py-1 text-[9px] hover:bg-[var(--text)] hover:text-[var(--bg)]">NEW // +</button>
+                  <button disabled={!isAdmin}
+                  onClick={() => isAdmin && setShowNewChar(true)} className="border border-[var(--border)] px-2 py-1 text-[9px] hover:bg-[var(--text)] hover:text-[var(--bg)]">NEW // +</button>
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-[1px] bg-[var(--border)]">
@@ -1189,8 +1195,10 @@ export default function App() {
                       <div className="flex gap-1">
                         <button
                           type="button"
+                          disabled={!isAdmin}
                           onClick={(e) => {
                             e.stopPropagation();
+                            if (!isAdmin) return;
                             setDeleteTarget({ type: 'character', id: c.id, name: c.name });
                           }}
                           className="text-[7px] border border-dashed border-[var(--border-soft)] px-1.5 py-[2px] opacity-70 hover:opacity-100 hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors cursor-pointer"
@@ -1245,7 +1253,8 @@ export default function App() {
                 <span className="text-[8px] opacity-60 hidden md:inline">STRESS: {selectedChapter.stress}% OFFSET: {selectedChapter.offset}% ANCHOR: {selectedChapter.anchor}% MEMORY: {selectedChapter.memory}%</span>
                 <button
                   type="button"
-                  onClick={() => setDeleteTarget({ type: 'chapter', id: selectedChapter.id, name: selectedChapter.title })}
+                  disabled={!isAdmin}
+                  onClick={() => isAdmin && setDeleteTarget({ type: 'chapter', id: selectedChapter.id, name: selectedChapter.title })}
                   className="border border-dashed border-[var(--border-soft)] px-2 py-1 text-[8px] opacity-70 hover:opacity-100 hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors cursor-pointer"
                   title="Delete this chapter"
                 >
