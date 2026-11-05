@@ -97,3 +97,55 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 @media (prefers-reduced-motion: reduce) {
   *,*::before,*::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+
+/* ASTRA refinement — Flip-book / electronic memory archive */
+:root {
+  --bg: #F8FAFC;
+  --bg-soft: #F1F5F9;
+  --bg-card: rgba(255,255,255,.88);
+  --text: #0F172A;
+  --text-dim: #64748B;
+  --text-faint: #94A3B8;
+  --border: #E2E8F0;
+  --border-soft: rgba(148,163,184,.32);
+  --accent: #4F46E5;
+  --accent-2: #06B6D4;
+  --layer-violet: #8B5CF6;
+  --layer-magenta: #D946EF;
+  --layer-emerald: #10B981;
+}
+body { -webkit-font-smoothing: antialiased; }
+#root { isolation: isolate; }
+.paper-texture {
+  border: 1px solid rgba(148,163,184,.28);
+  box-shadow: 0 16px 44px rgba(15,23,42,.07), inset 0 1px 0 rgba(255,255,255,.9);
+}
+.dot-grid {
+  background-color: rgba(255,255,255,.72);
+  background-image: radial-gradient(rgba(79,70,229,.2) .8px, transparent .8px);
+  background-size: 16px 16px;
+}
+.scanline {
+  background-image: repeating-linear-gradient(180deg, transparent 0 2px, rgba(6,182,212,.035) 2px 3px);
+}
+#root button:not(:disabled) { border-color: var(--border-soft); }
+#root button:hover:not(:disabled) {
+  border-color: rgba(79,70,229,.45);
+  box-shadow: 0 5px 18px rgba(79,70,229,.11), 0 0 0 1px rgba(6,182,212,.08);
+}
+#root input, #root select, #root textarea {
+  color: var(--text);
+  background: rgba(255,255,255,.9);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+#root input:focus, #root select:focus, #root textarea:focus {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 3px rgba(6,182,212,.12);
+}
+#root img { max-width: 100%; }
+@media (max-width: 640px) {
+  #root { overflow-x: clip; }
+  #root button { min-height: 40px; }
+}
