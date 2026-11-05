@@ -1,5 +1,3 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
-
 const OWNER = "uf-o";
 const REPO = "flip-book";
 const BRANCH = process.env.GITHUB_DATABASE_BRANCH || "main";
@@ -9,7 +7,7 @@ const API = "https://api.github.com";
 type RecordItem = { id: string; value: any };
 type Database = { version: number; updatedAt: string; collections: Record<string, RecordItem[]> };
 
-function respond(res: VercelResponse, status: number, body: unknown) {
+function respond(res: any, status: number, body: unknown) {
   res.setHeader("Cache-Control", "no-store");
   return res.status(status).json(body);
 }
@@ -43,9 +41,10 @@ async function writeDatabase(db: Database, sha?: string) {
   if (!response.ok) throw new Error(`GitHub write failed (${response.status}): ${await response.text()}`);
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   if (req.method !== "POST") return respond(res, 405, { error: "Method not allowed" });
   if (!process.env.GITHUB_TOKEN) return respond(res, 503, { error: "Shared database is not configured. Add GITHUB_TOKEN to Vercel Environment Variables." });
+  if (req.body?.action !== "records.list" && process.env.LIBRARY_WRITES_ENABLED !== "true") return respond(res, 403, { error: "Shared library is currently read-only. Enable LIBRARY_WRITES_ENABLED only after choosing a write-access policy." });
 
   const { action, args = {} } = (req.body || {}) as { action?: string; args?: any };
   const collection = String(args.collection || "default");
