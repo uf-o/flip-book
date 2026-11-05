@@ -54,90 +54,54 @@ type CharacterRecord = {
 // Offline-first data layer with IndexedDB & remote sync
 async function api(action: string, args: any) {
   const col = args?.collection || 'default';
+  const send = async () => {
+    const response = await fetch("/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ action, args }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Shared library request failed (${response.status})`);
+    return payload.data || {};
+  };
 
-  if (action === 'records.list') {
-    // Try remote first if online
+  if (action === "records.list") {
     try {
-      const res = await fetch("/actions", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action, args }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok && !json.error && Array.isArray(json.data?.records)) {
-        if (json.data.records.length > 0) {
-          await offlineSaveRecords(col, json.data.records);
-        } else {
-          // If remote is empty, check if we have offline records created while offline
-          const localRecords = await offlineGetRecords(col);
-          if (localRecords.length > 0) {
-            // Push offline records to server
-            for (const r of localRecords) {
-              await fetch("/actions", {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ action: 'records.create', args: { collection: col, value: r.value } }),
-              }).catch(() => {});
-            }
-            return { records: localRecords };
-          }
-        }
-        return json.data;
-      }
-    } catch {
-      // Offline mode
+      const data = await send();
+      const records = Array.isArray(data.records) ? data.records : [];
+      await offlineSaveRecords(col, records);
+      return { ...data, records };
+    } catch (error) {
+      // Read-only offline cache remains available when the shared service is unreachable.
+      const cached = await offlineGetRecords(col);
+      if (cached.length) return { records: cached, offline: true };
+      throw error;
     }
-
-    // Offline fallback: load cached records from IndexedDB
-    const offlineRecords = await offlineGetRecords(col);
-    return { records: offlineRecords };
   }
 
-  if (action === 'records.create') {
-    // Save to IndexedDB immediately for instant offline availability
-    const offlineRecord = await offlineCreateRecord(col, args.value);
-
-    // Also attempt remote sync in background
-    try {
-      const res = await fetch("/actions", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action, args }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok && json.data?.record) return json.data;
-    } catch {
-      // Offline
-    }
-    return { record: offlineRecord };
+  if (action === "records.create") {
+    const data = await send();
+    if (!data.record) throw new Error("The shared library did not confirm the new record.");
+    await offlineCreateRecord(col, args.value);
+    return data;
   }
 
-  if (action === 'records.replace') {
+  if (action === "records.replace") {
+    const data = await send();
+    if (!data.record && !data.success) throw new Error("The shared library did not confirm the update.");
     await offlineReplaceRecord(col, args.id, args.value);
-    try {
-      const res = await fetch("/actions", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action, args }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok && json.data) return json.data;
-    } catch {}
-    return { success: true };
+    return data;
   }
 
-  if (action === 'records.delete') {
+  if (action === "records.delete") {
+    const data = await send();
+    if (!data.success) throw new Error("The shared library did not confirm the deletion.");
     await offlineDeleteRecord(col, args.id);
-    try {
-      await fetch("/actions", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action, args }),
-      }).catch(() => {});
-    } catch {}
-    return { success: true };
+    return data;
   }
 
+  if (action === "admin.status" || action === "admin.login" || action === "admin.logout") return send();
   return {};
 }
 
@@ -626,34 +590,13 @@ export default function App() {
       const chVals = (chData.records || []).map((r: any) => r.value as ChapterRecord);
       const charVals = (charData.records || []).map((r: any) => r.value as CharacterRecord);
       
-      let isSeeded = false;
-      try {
-        isSeeded = localStorage.getItem('syn_seeded_vault') === '1';
-      } catch {}
-
-      if (!isSeeded && chVals.length === 0 && charVals.length === 0) {
-        // initial seed only once
-        for (const ch of SAMPLE_CHAPTERS) {
-          await api('records.create', { collection: 'chapters', value: ch, idempotency_key: makeKey() });
-        }
-        for (const c of SAMPLE_CHARACTERS) {
-          await api('records.create', { collection: 'characters', value: c, idempotency_key: makeKey() });
-        }
-        try { localStorage.setItem('syn_seeded_vault', '1'); } catch {}
-        const ch2 = await api('records.list', { collection: 'chapters' });
-        const ca2 = await api('records.list', { collection: 'characters' });
-        setChapters((ch2.records || []).map((r: any) => r.value));
-        setCharacters((ca2.records || []).map((r: any) => r.value));
-      } else {
-        try { localStorage.setItem('syn_seeded_vault', '1'); } catch {}
-        setChapters(chVals);
-        setCharacters(charVals);
-      }
+      setChapters(chVals);
+      setCharacters(charVals);
     } catch (e) {
       console.error(e);
-      // fallback to sample without persistence
-      setChapters(SAMPLE_CHAPTERS);
-      setCharacters(SAMPLE_CHARACTERS);
+      // Keep an empty library rather than inventing local-only media.
+      setChapters([]);
+      setCharacters([]);
     } finally {
       setLoading(false);
     }
