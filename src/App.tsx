@@ -595,8 +595,7 @@ export default function App() {
     } catch (e) {
       console.error(e);
       // Keep an empty library rather than inventing local-only media.
-      setChapters([]);
-      setCharacters([]);
+      // Preserve the last successfully loaded library during temporary network errors.
     } finally {
       setLoading(false);
     }
@@ -604,6 +603,24 @@ export default function App() {
 
   useEffect(() => {
     reloadRecords();
+    let refreshing = false;
+    const refresh = async () => {
+      if (refreshing || document.visibilityState !== 'visible' || !navigator.onLine) return;
+      refreshing = true;
+      try { await reloadRecords(); } finally { refreshing = false; }
+    };
+    const interval = window.setInterval(refresh, 5000);
+    const onFocus = () => { void refresh(); };
+    const onVisibility = () => { if (document.visibilityState === 'visible') void refresh(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onFocus);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('online', onFocus);
+    };
   }, []);
 
   // Ensure PDF.js CDN reference is preserved and attempt dynamic load for PDF import capability
