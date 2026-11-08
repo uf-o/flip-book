@@ -1,4 +1,4 @@
-import { get, set } from 'idb-keyval';
+import { del, get, set } from 'idb-keyval';
 
 export type StoredRecord = {
   id: string;
@@ -6,6 +6,33 @@ export type StoredRecord = {
 };
 
 const DB_PREFIX = 'syn_vault_idb_';
+const MEDIA_PREFIX = 'syn_vault_media_';
+
+export async function offlineGetMediaPage(mediaId: string): Promise<string | null> {
+  try {
+    const value = await get<string>(`${MEDIA_PREFIX}${mediaId}`);
+    return typeof value === 'string' ? value : null;
+  } catch (err) {
+    console.warn('IndexedDB media read error:', err);
+    return null;
+  }
+}
+
+export async function offlineSaveMediaPage(mediaId: string, dataUrl: string): Promise<void> {
+  try {
+    await set(`${MEDIA_PREFIX}${mediaId}`, dataUrl);
+  } catch (err) {
+    console.warn('IndexedDB media save error:', err);
+  }
+}
+
+export async function offlineDeleteMediaPage(mediaId: string): Promise<void> {
+  try {
+    await del(`${MEDIA_PREFIX}${mediaId}`);
+  } catch (err) {
+    console.warn('IndexedDB media delete error:', err);
+  }
+}
 
 export async function offlineGetRecords(collection: string): Promise<StoredRecord[]> {
   try {

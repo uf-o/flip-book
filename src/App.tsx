@@ -7,6 +7,9 @@ import {
   offlineCreateRecord,
   offlineReplaceRecord,
   offlineDeleteRecord,
+  offlineGetMediaPage,
+  offlineSaveMediaPage,
+  offlineDeleteMediaPage,
 } from './db';
 import { PWAInstallButton } from './PWAInstallButton';
 import { AdminAccess } from './AdminAccess';
@@ -136,10 +139,13 @@ async function uploadStoredMediaPage(mediaId: string, dataUrl: string) {
       size: Math.floor(base64.length * 3 / 4),
     });
   }
+  await offlineSaveMediaPage(mediaId, dataUrl);
   return mediaId;
 }
 
 async function loadStoredMediaPage(mediaId: string): Promise<string> {
+  const cached = await offlineGetMediaPage(mediaId);
+  if (cached) return cached;
   const first = await api("media.getChunk", { mediaId, index: 0 });
   if (!first?.chunkBase64 || !first.totalChunks || !first.contentType) {
     throw new Error(`PDF page data is missing from the shared library (${mediaId}).`);
@@ -150,7 +156,9 @@ async function loadStoredMediaPage(mediaId: string): Promise<string> {
     if (!next?.chunkBase64) throw new Error(`PDF page data is incomplete (${mediaId}, chunk ${index + 1}).`);
     base64 += next.chunkBase64;
   }
-  return `data:${first.contentType};base64,${base64}`;
+  const dataUrl = `data:${first.contentType};base64,${base64}`;
+  await offlineSaveMediaPage(mediaId, dataUrl);
+  return dataUrl;
 }
 
 // Sample data
@@ -892,7 +900,10 @@ export default function App() {
     } catch (err: any) {
       console.error('PDF Import error:', err);
       if (uploadedMediaIds.length) {
-        await Promise.allSettled(uploadedMediaIds.map((mediaId) => api("media.delete", { mediaId })));
+        await Promise.allSettled(uploadedMediaIds.flatMap((mediaId) => [
+          api("media.delete", { mediaId }),
+          offlineDeleteMediaPage(mediaId),
+        ]));
       }
       alert(`PDF IMPORT FAILED: ${err.message || 'Unknown error'}`);
     } finally {
