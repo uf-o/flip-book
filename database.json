@@ -1,8 +1,44 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-08T14:42:05.652Z",
+  "updatedAt": "2026-11-08T14:42:08.672Z",
   "collections": {
-    "chapters": [],
+    "chapters": [
+      {
+        "id": "25k6mas9ospmw7xy4mk",
+        "value": {
+          "id": "ch_1794148777904",
+          "title": "ASTRA ARC 1",
+          "pageCount": 16,
+          "date": "2026.11.08",
+          "characterIds": [],
+          "stress": 55,
+          "offset": 26,
+          "anchor": 80,
+          "memory": 73,
+          "vault": "BX-1101",
+          "description": "Imported PDF: astra-arc-1.pdf (16 pages). Transmuted into flipbook archive.",
+          "pageMediaIds": [
+            "ch_1794148777904_page_1",
+            "ch_1794148777904_page_2",
+            "ch_1794148777904_page_3",
+            "ch_1794148777904_page_4",
+            "ch_1794148777904_page_5",
+            "ch_1794148777904_page_6",
+            "ch_1794148777904_page_7",
+            "ch_1794148777904_page_8",
+            "ch_1794148777904_page_9",
+            "ch_1794148777904_page_10",
+            "ch_1794148777904_page_11",
+            "ch_1794148777904_page_12",
+            "ch_1794148777904_page_13",
+            "ch_1794148777904_page_14",
+            "ch_1794148777904_page_15",
+            "ch_1794148777904_page_16"
+          ],
+          "isPdf": true
+        }
+      }
+    ],
     "characters": []
   },
   "mediaFiles": {
