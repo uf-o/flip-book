@@ -31,6 +31,7 @@ type ChapterRecord = {
   vault: string;
   description: string;
   pages?: string[];
+  pageMediaIds?: string[];
   isPdf?: boolean;
 };
 
@@ -102,11 +103,49 @@ async function api(action: string, args: any) {
   }
 
   if (action === "admin.status" || action === "admin.login" || action === "admin.logout") return send();
+  if (action.startsWith("media.")) return send();
   return {};
 }
 
 // Idempotency
 const makeKey = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+const MEDIA_UPLOAD_CHUNK_SIZE = 2_000_000;
+
+async function uploadStoredMediaPage(mediaId: string, dataUrl: string) {
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) throw new Error("Invalid rendered PDF page data.");
+  const contentType = dataUrl.slice(5, comma).split(";")[0] || "image/jpeg";
+  const base64 = dataUrl.slice(comma + 1);
+  if (!base64) throw new Error("Rendered PDF page is empty.");
+  const totalChunks = Math.ceil(base64.length / MEDIA_UPLOAD_CHUNK_SIZE);
+  for (let index = 0; index < totalChunks; index++) {
+    const chunkBase64 = base64.slice(index * MEDIA_UPLOAD_CHUNK_SIZE, (index + 1) * MEDIA_UPLOAD_CHUNK_SIZE);
+    await api("media.chunk", {
+      mediaId,
+      index,
+      totalChunks,
+      chunkBase64,
+      contentType,
+      size: Math.floor(base64.length * 3 / 4),
+    });
+  }
+  return mediaId;
+}
+
+async function loadStoredMediaPage(mediaId: string): Promise<string> {
+  const first = await api("media.getChunk", { mediaId, index: 0 });
+  if (!first?.chunkBase64 || !first.totalChunks || !first.contentType) {
+    throw new Error(`PDF page data is missing from the shared library (${mediaId}).`);
+  }
+  let base64 = first.chunkBase64 as string;
+  for (let index = 1; index < Number(first.totalChunks); index++) {
+    const next = await api("media.getChunk", { mediaId, index });
+    if (!next?.chunkBase64) throw new Error(`PDF page data is incomplete (${mediaId}, chunk ${index + 1}).`);
+    base64 += next.chunkBase64;
+  }
+  return `data:${first.contentType};base64,${base64}`;
+}
 
 // Sample data
 const SAMPLE_CHARACTERS: CharacterRecord[] = [
@@ -736,6 +775,7 @@ export default function App() {
     setBusy(true);
     setPdfImportProgress({ current: 0, total: 1, filename: file.name });
 
+    const uploadedMediaIds: string[] = [];
     try {
       const arrayBuffer = await file.arrayBuffer();
 
@@ -808,6 +848,16 @@ export default function App() {
         .slice(0, 36)
         .toUpperCase();
 
+      const pageMediaIds: string[] = [];
+      setPdfImportProgress({ current: 0, total: renderedPages.length, filename: file.name });
+      for (let index = 0; index < renderedPages.length; index++) {
+        const mediaId = `${id}_page_${index + 1}`;
+        uploadedMediaIds.push(mediaId);
+        setPdfImportProgress({ current: index + 1, total: renderedPages.length, filename: file.name });
+        await uploadStoredMediaPage(mediaId, renderedPages[index]);
+        pageMediaIds.push(mediaId);
+      }
+
       const newRecord: ChapterRecord = {
         id,
         title: cleanTitle,
@@ -821,10 +871,13 @@ export default function App() {
         vault: `BX-${1100 + chapters.length + 1}`,
         description: `Imported PDF: ${file.name} (${renderedPages.length} pages). Transmuted into flipbook archive.`,
         pages: renderedPages,
+        pageMediaIds,
         isPdf: true,
       };
 
-      await api('records.create', { collection: 'chapters', value: newRecord, idempotency_key: makeKey() });
+      // Keep heavy page data out of the chapter JSON request; only persist stable media ids.
+      const { pages: _renderedPages, ...storedRecord } = newRecord;
+      await api('records.create', { collection: 'chapters', value: storedRecord, idempotency_key: makeKey() });
       await reloadRecords();
 
       // Open reader immediately on the newly imported PDF!
@@ -832,6 +885,9 @@ export default function App() {
       setShowNewChapter(false);
     } catch (err: any) {
       console.error('PDF Import error:', err);
+      if (uploadedMediaIds.length) {
+        await Promise.allSettled(uploadedMediaIds.map((mediaId) => api("media.delete", { mediaId })));
+      }
       alert(`PDF IMPORT FAILED: ${err.message || 'Unknown error'}`);
     } finally {
       setBusy(false);
@@ -940,9 +996,29 @@ export default function App() {
     }
   }
 
-  // Open reader
-  const openChapter = (ch: ChapterRecord) => {
-    setSelectedChapter(ch);
+  // Open reader; fetch PDF pages from the app's own shared library only when needed.
+  const openChapter = async (ch: ChapterRecord) => {
+    let chapterToOpen = ch;
+    if (ch.pageMediaIds?.length && (!ch.pages || ch.pages.length === 0)) {
+      setBusy(true);
+      try {
+        const loadedPages: string[] = [];
+        // Limit parallel reads so large archives do not overwhelm the server or GitHub API.
+        for (let start = 0; start < ch.pageMediaIds.length; start += 4) {
+          const batch = ch.pageMediaIds.slice(start, start + 4);
+          const pagesBatch = await Promise.all(batch.map((mediaId) => loadStoredMediaPage(mediaId)));
+          loadedPages.push(...pagesBatch);
+        }
+        chapterToOpen = { ...ch, pages: loadedPages };
+      } catch (error: any) {
+        console.error("PDF page retrieval failed:", error);
+        alert(`PDF COULD NOT BE LOADED: ${error?.message || "Shared page data is unavailable."}`);
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
+    setSelectedChapter(chapterToOpen);
     setPageIndex(0);
     setView('reader');
     setShowChars(false);
