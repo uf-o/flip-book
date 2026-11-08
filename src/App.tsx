@@ -55,12 +55,18 @@ type CharacterRecord = {
 // Offline-first data layer with IndexedDB & remote sync
 async function api(action: string, args: any) {
   const col = args?.collection || 'default';
+  // Never resend hydrated PDF image data when a chapter's metadata is edited.
+  let safeArgs = args;
+  if (args?.value && Array.isArray(args.value.pageMediaIds) && Array.isArray(args.value.pages)) {
+    const { pages: _pages, ...storedValue } = args.value;
+    safeArgs = { ...args, value: storedValue };
+  }
   const send = async () => {
     const response = await fetch("/actions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify({ action, args }),
+      body: JSON.stringify({ action, args: safeArgs }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `Shared library request failed (${response.status})`);
@@ -84,14 +90,14 @@ async function api(action: string, args: any) {
   if (action === "records.create") {
     const data = await send();
     if (!data.record) throw new Error("The shared library did not confirm the new record.");
-    await offlineCreateRecord(col, args.value);
+    await offlineCreateRecord(col, safeArgs.value);
     return data;
   }
 
   if (action === "records.replace") {
     const data = await send();
     if (!data.record && !data.success) throw new Error("The shared library did not confirm the update.");
-    await offlineReplaceRecord(col, args.id, args.value);
+    await offlineReplaceRecord(col, safeArgs.id, safeArgs.value);
     return data;
   }
 
